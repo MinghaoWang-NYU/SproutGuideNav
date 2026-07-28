@@ -28,13 +28,13 @@ from fauna_msgs.msg import VelocityCommand
 # ---------- 模拟上层策略输出的速度指令序列 ----------
 # 每段: (vx[m/s], vy[m/s], vyaw[rad/s], 持续时间[s])
 POLICY_SEQUENCE = [
-    (0.30, 0.0, 0.0, 3.0),   # 直行前进 3 秒
+    (0.30, 0.0, 0.0, 2.0),   # 直行前进 2 秒
     (0.00, 0.0, 0.5, 2.0),   # 原地左转 2 秒
-    (0.30, 0.0, 0.2, 3.0),   # 边走边微左转 3 秒
+    (0.30, 0.0, 0.2, 2.0),   # 边走边微左转 2 秒
     (0.00, 0.0, 0.0, 1.0),   # 停住 1 秒
 ]
 
-CONTROL_HZ = 20.0            # 发布频率; 指令 ~2s 无更新会过期, 20Hz 足够
+CONTROL_HZ = 5.0            # 发布频率; 指令 ~2s 无更新会过期
 TOPIC = '/motor_control/velocity/command'
 
 
@@ -49,7 +49,7 @@ class PolicyVelocityBridge(Node):
         self.create_timer(1.0 / CONTROL_HZ, self.on_tick)
         self.get_logger().info(f'publishing to {TOPIC}, sender_id={self.sender_id}')
 
-    def current_cmd(self, elapsed_s):
+    def current_cmd(self, elapsed_s): # elapsed_s为当前时间
         """根据已运行时间取出当前 (vx, vy, vyaw); 序列结束返回 None。"""
         t = 0.0
         for vx, vy, vyaw, dur in POLICY_SEQUENCE:
