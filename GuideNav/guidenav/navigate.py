@@ -1,6 +1,8 @@
 import os
+import re
 import sys
 import time
+import uuid
 import yaml
 import copy
 import argparse
@@ -27,10 +29,19 @@ from place_recognition import extract_database
 # feature matching for rel pose est.
 from match_to_control import feature_match, se2_estimate, control # estimate_pose_test
 
-# Go2 control
+# Sprout control (fauna SDK)
 import rclpy
+from rclpy import wait_for_message
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+from fauna_msgs.msg import MotorControlInputMode, MotorControlSystemState, VelocityCommand
+
+# 指令仲裁用的优先级, 完整优先级表见官方 DOCS-SITE
+# 手柄 5000 > Autonomy UI 4000 > Teleop 3000 > GuideNav (SDK 默认) 0
+FAUNA_SDK_COMMAND_PRIORITY = 0
+
+# Sprout 运动控制话题
+VELOCITY_COMMAND_TOPIC = '/motor_control/velocity/command'
+SYSTEM_STATE_TOPIC = '/motor_control/system_state'
 
 # realsense stream input
 import threading
@@ -47,6 +58,25 @@ matplotlib.use('Agg')  # Use non-interactive backend
 
 # smooth behavior
 from collections import deque
+
+
+def _topomap_sort_key(filename: str):
+    """拓扑图关键帧的排序 key。
+
+    兼容两种命名: gen_dinov3.py 输出的 'keyframe_000000.jpg' 和
+    extract_data_two.py 的时间戳文件名 '1712345678.123456789.png'。
+    对零填充的 keyframe_%06d, 该顺序与 extract_database.py 里 sorted(paths)
+    的字符串序一致 —— 否则 PR 数据库索引会和 topomap_images 错位。
+    """
+    stem = os.path.splitext(filename)[0]
+    try:
+        return (0, float(stem), stem)
+    except ValueError:
+        pass
+    match = re.search(r'(\d+)$', stem)
+    if match:
+        return (0, float(match.group(1)), stem)
+    return (1, 0.0, stem)
 
 
 class FakeRGBDSubscriber(Node):
@@ -166,6 +196,9 @@ class RGBDSubscriber(Node):
         self.use_odometry = use_odometry
 
         if self.use_odometry:
+            # NOTE: 这条分支目前是死代码 —— __main__ 里硬编码 use_odometry=False,
+            # 且 odom_msg 一路传到 navigate_one_step 后并未被使用。
+            # 若要在 Sprout 上启用, 需先用 `ros2 topic list | grep -i odom` 确认实际话题名。
             # Use message_filters for synced subscription
             from message_filters import Subscriber, ApproximateTimeSynchronizer
             from nav_msgs.msg import Odometry
@@ -187,10 +220,10 @@ class RGBDSubscriber(Node):
             self.rgb_image = None
             self.depth_image = None
 
-            # self.rgb_sub = self.create_subscription(Image, '/camera/color/image_raw', self.rgb_callback, 10)
-            # self.depth_sub = self.create_subscription(Image, '/camera/aligned_depth_to_color/image_raw', self.depth_callback, 10)
-            self.rgb_sub = self.create_subscription(Image, '/d435i/color/image_raw', self.rgb_callback, 10)
-            self.depth_sub = self.create_subscription(Image, '/d435i/aligned_depth_to_color/image_raw', self.depth_callback, 10)
+            # Sprout ZED2i 话题 (SDK 文档 04 - Perception)
+            self.rgb_sub = self.create_subscription(Image, '/zed/rgb/image_rect_color', self.rgb_callback, 10)
+            # reloc3r 不使用深度图, depth 订阅删除
+            # self.depth_sub = self.create_subscription(Image, '/d435i/aligned_depth_to_color/image_raw', self.depth_callback, 10)
 
     def rgb_callback(self, msg):
         self.rgb_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
@@ -201,7 +234,8 @@ class RGBDSubscriber(Node):
         self.try_process()
 
     def try_process(self):
-        if self.rgb_image is not None and self.depth_image is not None:
+        # 只订阅 RGB, 所以收到一帧就处理; depth 恒为 None
+        if self.rgb_image is not None:
             self.guidenav_node.process_stream_image(self.rgb_image, self.depth_image, None)
             self.rgb_image = None
             self.depth_image = None
@@ -321,7 +355,10 @@ class GuideNavNode:
 
         # Create ROS2 node and publisher
         self.ros_node = rclpy.create_node('guidenav_vel_pub')
-        self.cmd_vel_pub = self.ros_node.create_publisher(Twist, '/cmd_vel', 10)
+        # sender_id 只生成一次, 所有指令复用 —— 仲裁靠它识别"同一发送方"
+        self._sender_id = f'guidenav-{uuid.uuid4()}'
+        self.cmd_vel_pub = self.ros_node.create_publisher(
+            VelocityCommand, VELOCITY_COMMAND_TOPIC, 10)
 
         self.enable_debug = getattr(args, 'enable_debug', True)
 
@@ -359,12 +396,42 @@ class GuideNavNode:
         # Add thread lock for thread safety
         self.processing_lock = threading.Lock()
 
+    def check_sprout_ready(self) -> bool:
+        """发布速度指令前确认机器人处于 walk 模式且为 API 输入模式。
+
+        必须在节点被加入 executor 之前调用 —— wait_for_message 会自己 spin 该节点。
+        """
+        _, system_state = wait_for_message.wait_for_message(
+            MotorControlSystemState, self.ros_node, SYSTEM_STATE_TOPIC)
+        if system_state.mode != "walk":
+            print(f"[ERROR] Robot is not in walk mode. Current mode: '{system_state.mode}'. "
+                  "游戏手柄按 D-Pad Up 切换到 Walk Mode。")
+            return False
+        if system_state.input_mode != MotorControlInputMode.API:
+            current_mode = "JOYSTICK" if system_state.input_mode == MotorControlInputMode.JOYSTICK else "UNKNOWN"
+            print(f"[ERROR] Robot is not in API input mode (currently in {current_mode} mode). "
+                  "游戏手柄按 Start(+) 进入 API Mode。")
+            return False
+        print("[INFO] Sprout is in walk + API mode, ready for velocity commands.")
+        return True
+
     def publish_cmd_vel(self, v: float, w: float):
-        """Publish velocity commands"""
-        twist = Twist()
-        twist.linear.x = v
-        twist.angular.z = w
-        self.cmd_vel_pub.publish(twist)
+        """Publish velocity commands
+
+        速度符号约定 (SDK 文档 01b): vx 正值前进, vyaw 正值左转 —— 与 GuideNav 的 (v, w) 一致。
+        """
+        max_v = self.robot_config['max_v']
+        max_w = self.robot_config['max_w']
+
+        msg = VelocityCommand()
+        # ---- 指令仲裁: sender_id 标识指令来源, priority 决定谁能压过谁 ----
+        msg.command_priority.sender_id = self._sender_id
+        msg.command_priority.priority = FAUNA_SDK_COMMAND_PRIORITY
+        # 限幅兜底 (control.vtr_controller 内部已按同样的 max_v/max_w 限过一次)
+        msg.vx = float(np.clip(v, -max_v, max_v))
+        msg.vy = 0.0
+        msg.vyaw = float(np.clip(w, -max_w, max_w))
+        self.cmd_vel_pub.publish(msg)
 
     def process_stream_image(self, rgb_img, depth_img, odom_msg):
         """Process incoming RealSense images in real-time"""
@@ -376,7 +443,8 @@ class GuideNavNode:
             # RGB image transform
             current_obs = self._image_transform(rgb_img).unsqueeze(0).to(self.device)
 
-            if depth_img.max() > 1000:  # likely in mm
+            # Sprout 上只订阅 RGB, depth 恒为 None
+            if depth_img is not None and depth_img.max() > 1000:  # likely in mm
                 depth_img = depth_img / 1000.0
 
             # Maintain context queue
@@ -534,6 +602,11 @@ class GuideNavNode:
                 
             else:
                 # Handle other feature matching methods
+                if depth_img is None:
+                    print(f"[ERROR] Feature matching method '{self.fm_method}' 需要深度图, "
+                          "但当前只订阅了 RGB。Sprout 配置下请使用 --feature-matching reloc3r")
+                    return 0.0, 0.0, 0.0, 0.0, 0.0
+
                 kp1, kp2, matches = self.do_feature_matching(rgb_img, sg_img)
                 x, y, yaw = se2_estimate.pnpRansac(kp1, kp2, matches, depth_img, self.K)
                 
@@ -586,7 +659,7 @@ class GuideNavNode:
         for img_suffix in self.img_suffix:
             topomap_images.extend(list(self.topomap_img_dir.glob(f"*.{img_suffix}")))
         self.topomap_filenames = [img.name for img in topomap_images]
-        self.topomap_filenames = sorted(self.topomap_filenames, key=lambda filename: int(filename.split(".")[0]))
+        self.topomap_filenames = sorted(self.topomap_filenames, key=_topomap_sort_key)
 
         # Load the topomap images
         map_size = len(self.topomap_filenames)
@@ -865,9 +938,16 @@ if __name__ == '__main__':
     guidenav_node = GuideNavNode(args)
     guidenav_node.save_visualizations = True  # Optional: control whether to save visualizations
 
+    # 前置检查: 机器人必须在 walk + API 模式, 否则速度指令会被静默丢弃。
+    # 必须在 executor.add_node 之前 —— wait_for_message 会自己 spin 这个节点。
+    if not args.offline_images and not guidenav_node.check_sprout_ready():
+        guidenav_node.ros_node.destroy_node()
+        rclpy.shutdown()
+        sys.exit(1)
+
     # Start navigation logic
     guidenav_node.start_navigation()
-     
+
     try:
         if args.offline_images:
             # Use fake RGBD subscriber for offline testing

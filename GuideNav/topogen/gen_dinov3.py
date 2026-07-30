@@ -246,10 +246,11 @@ def main():
 
     # Load images
     extensions = ('.png', '.jpg', '.jpeg')
+    # float 排序, 兼容 extract_data_two.py 的时间戳文件名 (int() 会直接崩)
     image_paths = sorted(
         [os.path.join(args.input, f) for f in os.listdir(args.input)
          if f.lower().endswith(extensions)],
-        key=lambda x: int(os.path.basename(x).split(".")[0])
+        key=lambda x: float(os.path.splitext(os.path.basename(x))[0])
     )
 
     print(f"Found {len(image_paths)} images")

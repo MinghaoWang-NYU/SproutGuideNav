@@ -52,3 +52,22 @@ go2:
   reached_goal_topic: "/toponav/reached_goal"
   stop_topic: "/toponav/stop"
   toponav_viz_info_topic: "/toponav/viz_info"
+
+sprout:
+  # 速度限制（代码中实际读取 max_v 和 max_w）
+  max_v: 0.3      # m/s，室内建议值
+  max_w: 0.4      # rad/s
+
+  # ZED2i 相机内参（代码用于构建 K 矩阵，必须填写真实值）
+  # 获取方法：ros2 topic echo /zed/rgb/camera_info --once
+  # 在输出的 K 字段中找到 [fx, 0, cx, 0, fy, cy, 0, 0, 1]
+  fx: 0.0         # ← 替换为实际值
+  fy: 0.0         # ← 替换为实际值
+  cx: 0.0         # ← 替换为实际值
+  cy: 0.0         # ← 替换为实际值
+
+  # 平滑参数（仅在 --use_smoothing 参数开启时读取）
+  smooth_pose_alpha_x: 0.8
+  smooth_pose_alpha_y: 0.1
+  smooth_pose_alpha_yaw: 0.5
+  smooth_cmd_alpha: 0.6
