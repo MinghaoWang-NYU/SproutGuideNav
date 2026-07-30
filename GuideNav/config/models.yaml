@@ -3,9 +3,9 @@ cosplace:
   output: "global-feats-cosplace"
   model:
     name: "cosplace"
-    backbone: "EfficientNet_B0"
+    backbone: "ResNet50"
     fc_output_dim: 512
-    checkpoint_path: "efficientnet_85x85.pth"
+    checkpoint_path: "resnet50_512.pth"
 
 selavpr:
   output: "global-feats-selavpr"
