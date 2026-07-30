@@ -20,7 +20,6 @@ depth/ 只用于和 build_topomap.py 的时间戳对齐检查, 关键帧筛选�
 """
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 import os
@@ -63,10 +62,10 @@ class SimpleImageSaver(Node):
         # Sprout ZED2i RGB + depth 话题 (SDK 文档 04 - Perception)
         # depth/ 是给 naive 建图 (build_topomap.py) 用的时间戳对齐输入; reloc3r repeat phase 本身不需要深度图
         self.create_subscription(Image, '/zed/rgb/image_rect_color', self.zed_rgb_callback, 10)
-        # depth 话题多数相机驱动用 BEST_EFFORT 发布 (带宽大), 用默认 RELIABLE 订阅会因 QoS 不兼容
-        # 静默收不到任何消息 (不报错), 这里改用 qos_profile_sensor_data (BEST_EFFORT) 订阅
-        self.create_subscription(
-            Image, '/zed/depth/depth_registered', self.zed_depth_callback, qos_profile_sensor_data)
+        # 实测确认: fauna_zed_node 发布 /zed/depth/depth_registered 用的是 RELIABLE
+        # (`ros2 topic info /zed/depth/depth_registered -v` 可核实), 跟默认 QoS (10, RELIABLE) 一致即可,
+        # 之前用 BEST_EFFORT (qos_profile_sensor_data) 订阅在这台机器的 rmw_zenoh_cpp 上收不到任何消息
+        self.create_subscription(Image, '/zed/depth/depth_registered', self.zed_depth_callback, 10)
         self.create_subscription(Odometry, self.odom_topic, self.odom_callback, 10)
 
         # Setup CSV for odometry
