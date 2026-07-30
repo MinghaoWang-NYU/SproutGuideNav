@@ -1,0 +1,25 @@
+# Core Python dependencies for GuideNav (place recognition, feature matching, topological mapping)
+numpy
+opencv-python
+torch
+torchvision
+Pillow
+matplotlib
+scipy
+PyYAML
+pandas
+h5py
+tqdm
+scikit-learn
+
+# --- NOT installable via pip ---
+# The following are ROS2 Humble packages. Install via apt
+# (e.g. `sudo apt install ros-humble-<package>`) or the robot vendor's
+# ROS2 workspace, not pip:
+#   rclpy, cv_bridge, message_filters,
+#   sensor_msgs, nav_msgs, geometry_msgs, std_msgs, fauna_msgs
+#
+# The following are referenced in guidenav/match_to_control/feature_match.py
+# and selavpr.py but are not published on PyPI. They must be cloned and
+# installed from source (repo URLs not recorded in this project):
+#   romatch (RoMa), LoFTR, LiftFeat, dust3r, mast3r, reloc3r, selavpr
