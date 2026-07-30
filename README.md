@@ -17,3 +17,5 @@ ros2 topic pub /motor_control/velocity/command     fauna_msgs/msg/VelocityComman
       vx: 0.1, vy: 0.0, vyaw: 0.0}"     --rate 5
 
 ros2 topic echo /motor_control/velocity/command
+
+python sensor/extract_data_two.py --output-dir ./data/teaching_run

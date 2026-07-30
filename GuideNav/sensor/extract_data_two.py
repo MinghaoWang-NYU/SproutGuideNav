@@ -20,6 +20,7 @@ depth/ 只用于和 build_topomap.py 的时间戳对齐检查, 关键帧筛选�
 """
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 import os
@@ -62,7 +63,10 @@ class SimpleImageSaver(Node):
         # Sprout ZED2i RGB + depth 话题 (SDK 文档 04 - Perception)
         # depth/ 是给 naive 建图 (build_topomap.py) 用的时间戳对齐输入; reloc3r repeat phase 本身不需要深度图
         self.create_subscription(Image, '/zed/rgb/image_rect_color', self.zed_rgb_callback, 10)
-        self.create_subscription(Image, '/zed/depth/depth_registered', self.zed_depth_callback, 10)
+        # depth 话题多数相机驱动用 BEST_EFFORT 发布 (带宽大), 用默认 RELIABLE 订阅会因 QoS 不兼容
+        # 静默收不到任何消息 (不报错), 这里改用 qos_profile_sensor_data (BEST_EFFORT) 订阅
+        self.create_subscription(
+            Image, '/zed/depth/depth_registered', self.zed_depth_callback, qos_profile_sensor_data)
         self.create_subscription(Odometry, self.odom_topic, self.odom_callback, 10)
 
         # Setup CSV for odometry
@@ -102,6 +106,13 @@ class SimpleImageSaver(Node):
             self.get_logger().error(f"Error in zed_rgb_callback: {e}")
 
     def zed_depth_callback(self, msg):
+        # 诊断用: 不经过任何转换代码, 确认回调本身有没有被中间件触发
+        self.depth_cb_hits = getattr(self, 'depth_cb_hits', 0) + 1
+        if self.depth_cb_hits <= 3 or self.depth_cb_hits % 50 == 0:
+            self.get_logger().info(
+                f"[diag] zed_depth_callback fired (#{self.depth_cb_hits}), "
+                f"encoding={msg.encoding}, size={msg.width}x{msg.height}, step={msg.step}, "
+                f"data_len={len(msg.data)}")
         try:
             timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
             ts_str = f"{timestamp:.9f}"
@@ -118,7 +129,8 @@ class SimpleImageSaver(Node):
             self.depth_count += 1
 
         except Exception as e:
-            self.get_logger().error(f"Error in zed_depth_callback: {e}")
+            import traceback
+            self.get_logger().error(f"Error in zed_depth_callback: {e}\n{traceback.format_exc()}")
 
     def odom_callback(self, msg):
         try:
