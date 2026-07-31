@@ -15,8 +15,8 @@ Usage:
 是可选的 (build_topomap.py 已支持 depth 缺失的情况), 关键帧筛选逻辑本身不读取深度值。
 
 注意: /zed/depth/depth_registered 发布的是 32FC1 (米制 float) 深度图, 这里转换成
-16-bit PNG (毫米整数) 存储。如果后续要给 PnP 类位姿估计使用这份深度数据, 需要在读取时把
-像素值除以 1000 换算回米。
+16-bit PNG (毫米整数) 存储。如果后续要给 se2_estimate.py 的 PnP 分支使用这份深度数据,
+需要在读取时把像素值除以 1000 换算回米, 目前 se2_estimate.py 里没有做这个换算。
 
 时间戳来源: 三路数据都用本节点接收到消息那一刻的本地时钟 (self.get_clock().now()) 打时间戳,
 不用各话题自己的 msg.header.stamp。原因: 实测发现 ZED 相机和 /fused_odom 的 header.stamp
@@ -69,7 +69,8 @@ class SimpleImageSaver(Node):
         # depth/ 是给 naive 建图 (build_topomap.py) 用的时间戳对齐输入; reloc3r repeat phase 本身不需要深度图
         self.create_subscription(Image, '/zed/rgb/image_rect_color', self.zed_rgb_callback, 10)
         # 实测确认: fauna_zed_node 发布 /zed/depth/depth_registered 用的是 RELIABLE
-        # (`ros2 topic info /zed/depth/depth_registered -v` 可核实), 跟默认 QoS (10, RELIABLE) 一致即可
+        # (`ros2 topic info /zed/depth/depth_registered -v` 可核实), 跟默认 QoS (10, RELIABLE) 一致即可,
+        # 之前用 BEST_EFFORT (qos_profile_sensor_data) 订阅在这台机器的 rmw_zenoh_cpp 上收不到任何消息
         self.create_subscription(Image, '/zed/depth/depth_registered', self.zed_depth_callback, 10)
         self.create_subscription(Odometry, self.odom_topic, self.odom_callback, 10)
 
@@ -199,9 +200,7 @@ def main():
         node = SimpleImageSaver(args.output_dir, odom_topic=args.odom_topic)
         node.get_logger().info("Simple ImageSaver node started.")
         rclpy.spin(node)
-    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
-        # ExternalShutdownException: the process received a signal and rclpy
-        # already began tearing down the context.
+    except KeyboardInterrupt:
         print("\nShutting down gracefully...")
     except Exception as e:
         print(f"Exception in main: {e}")
@@ -209,12 +208,8 @@ def main():
         traceback.print_exc()
     finally:
         if node is not None:
-            # destroy_node() closes the odometry CSV.
             node.destroy_node()
-        # Only shut down if the context is still valid -- avoids the
-        # "rcl_shutdown already called" error on signal-driven exits.
-        if rclpy.ok():
-            rclpy.shutdown()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

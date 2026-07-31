@@ -21,9 +21,7 @@ class CosPlace(BaseModel):
     def _init(self, conf):
 
         self.net = GeoLocalizationNet(conf['backbone'], conf['fc_output_dim'])
-        # map_location='cpu': checkpoint 可能是在有 GPU 的机器上存的, 这里先加载到
-        # CPU 避免在无 GPU 环境下反序列化失败; 调用方随后会把整个模型 .to(device)
-        model_state_dict = torch.load(conf['checkpoint_path'], map_location='cpu')
+        model_state_dict = torch.load( conf['checkpoint_path'])
         self.net.load_state_dict(model_state_dict)
         self.net = self.net.eval()
 

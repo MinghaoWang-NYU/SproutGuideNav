@@ -1,0 +1,33 @@
+# GPU 版本的 ros2_sprout 镜像，基于 /home/alan/ros2_sprout_ws/Dockerfile 原样重建，
+# 额外加上 cv_bridge（原容器里是 apt 装的，但没写进原 Dockerfile）和
+# GuideNav 需要的 CUDA 版 torch/torchvision + requirements.txt。
+# 跟原来的 ros2_sprout:humble 容器完全独立，不会互相影响。
+FROM ros:humble-ros-base
+
+RUN apt update && apt install -y \
+    git \
+    curl \
+    python3-pip \
+    python3-colcon-common-extensions \
+    ros-humble-rmw-zenoh-cpp \
+    ros-humble-cv-bridge \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV RMW_IMPLEMENTATION=rmw_zenoh_cpp
+
+WORKDIR /workspace
+
+# 宿主机驱动是 535.230.02 (CUDA 12.2)。torch==2.7.0 只提供 cu118/cu126/cu128 三种
+# CUDA build (没有 cu121/cu122 了), 而 cu126/cu128 要求的最低驱动版本比 535 新,
+# 用 cu118 (要求驱动 >= 450.80.02) 保证跟这块驱动兼容
+RUN pip install torch==2.7.0 torchvision==0.22.0 \
+    --index-url https://download.pytorch.org/whl/cu118
+
+COPY requirements.txt /tmp/guidenav-requirements.txt
+RUN pip install -r /tmp/guidenav-requirements.txt
+
+RUN echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc && \
+    echo "export RMW_IMPLEMENTATION=rmw_zenoh_cpp" >> ~/.bashrc && \
+    echo "if [ -f /workspace/fauna_ws/install/setup.bash ]; then source /workspace/fauna_ws/install/setup.bash; fi" >> ~/.bashrc
+
+CMD ["/bin/bash"]

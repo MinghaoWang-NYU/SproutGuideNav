@@ -1,0 +1,85 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Data and outputs
+data/
+outputs/
+visualization_results/
+*.avi
+
+# Keep teaser assets
+!assets/teaser.mp4
+
+# Model weights (keep .gitignore files)
+model_weights/**/*.pt
+model_weights/**/*.pth
+model_weights/**/*.ckpt
+!model_weights/.gitignore
+!model_weights/**/.gitignore
+
+# Torch hub cache (populated by reloc3r on first run)
+torch_hub_checkpoints/
+
+# Upstream feature-matching repos, cloned by the user.
+# See the README (Feature Matching Setup).
+guidenav/match_to_control/methods/*
+!guidenav/match_to_control/methods/.gitkeep
+
+# Debug output from debug/save_data.py
+debug_results/
+debug_results_*/
+*.mp4
+!assets/teaser.mp4
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+
+# ROS2
+log/
+install/
+build/
+
+# Temporary files
+*.tmp
+*.bak
